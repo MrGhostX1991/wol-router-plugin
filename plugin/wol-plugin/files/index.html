@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4f7cff">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="WOL">
+<title>网络唤醒 WOL</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; padding: 14px; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f4f6fa; color: #222; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 19px; text-align: center; margin: 6px 0 2px; }
+  .sub { text-align: center; color: #888; font-size: 12px; margin-bottom: 14px; }
+  .card { background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 9px; box-shadow: 0 1px 3px rgba(0,0,0,.07); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .name { font-size: 15px; font-weight: 600; word-break: break-all; }
+  .mac { font-size: 11px; color: #999; font-family: monospace; margin-top: 2px; word-break: break-all; }
+  .status { font-size: 12px; margin-top: 4px; }
+  .status.green { color: #2ea44f; }
+  .status.gray { color: #999; }
+  .status.yellow { color: #d9930a; }
+  .status.red { color: #d33; }
+  .hist { font-size: 11px; color: #8a6d00; background: #fffbe8; border-radius: 6px; padding: 3px 7px; margin-top: 4px; display: inline-block; }
+  .hist.up { color: #d33; }   /* 变慢 */
+  .hist.down { color: #2ea44f; } /* 变快 */
+  button { border: 0; background: #4f7cff; color: #fff; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  button:active { opacity: .7; }
+  button.ok { background: #2ea44f; }
+  button.err { background: #d33; }
+  button.gray { background: #8a94a6; }
+  button.small { padding: 5px 9px; font-size: 12px; }
+  button.red { background: #e5534b; }
+  button.green { background: #2ea44f; }
+  #log { background: #1d2129; color: #7f7; font-family: monospace; font-size: 12px; border-radius: 8px; padding: 10px; min-height: 38px; white-space: pre-wrap; margin-top: 10px; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 10px; }
+  .toolbar button { flex: 1; }
+  #manage { display: none; }
+  .addbox { background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+  .addbox .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .addbox input { flex: 1; padding: 9px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; min-width: 0; }
+  .addbox .hint { font-size: 11px; color: #999; }
+  .muted { color: #999; font-size: 12px; text-align: center; padding: 14px; }
+  .devrow { display: flex; align-items: center; gap: 6px; }
+  .devrow .info { flex: 1; min-width: 0; }
+  .scanrow { display: flex; align-items: center; gap: 8px; }
+  .scanrow .info { flex: 1; min-width: 0; }
+  .subsection { font-size: 13px; color: #666; margin: 12px 0 6px; font-weight: 600; }
+  .refresh { text-align: center; margin-bottom: 8px; }
+  .refresh button { background: #8a94a6; padding: 5px 14px; font-size: 12px; }
+  /* 2FA */
+  #authview { display: none; }
+  .authbox { background: #fff; border-radius: 16px; padding: 24px 20px; margin: 30px auto; max-width: 360px; box-shadow: 0 2px 10px rgba(0,0,0,.08); text-align: center; }
+  .authbox h2 { font-size: 20px; margin: 0 0 8px; }
+  .authbox p { font-size: 13px; color: #777; margin: 0 0 20px; }
+  #codeInput { width: 100%; padding: 14px; border: 2px solid #ddd; border-radius: 10px; font-size: 28px; text-align: center; letter-spacing: 8px; font-family: monospace; outline: none; }
+  #codeInput:focus { border-color: #4f7cff; }
+  .authbox button { width: 100%; margin-top: 14px; padding: 13px; font-size: 15px; }
+  #authlog { color: #d33; font-size: 13px; margin-top: 12px; min-height: 18px; }
+</style>
+</head>
+<body>
+
+<div id="authview">
+  <div class="authbox">
+    <div style="font-size:40px;margin-bottom:6px">🔐</div>
+    <h2>双因素验证</h2>
+    <p>请输入认证器 App 中的 6 位动态验证码</p>
+    <input id="codeInput" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000">
+    <button id="btnVerify">验 证</button>
+    <div id="authlog"></div>
+  </div>
+</div>
+
+<div id="mainview" style="display:none">
+  <h1>⚡ 网络唤醒 WOL</h1>
+  <div class="sub">局域网 Magic Packet</div>
+
+  <div class="toolbar">
+    <button id="btnWakeView">唤醒设备</button>
+    <button id="btnManageView" class="gray">管理设备</button>
+  </div>
+
+  <div class="refresh"><button id="btnRefreshStatus">🔄 刷新状态</button></div>
+  <div id="wakeview"></div>
+
+  <div id="manage">
+    <div class="addbox">
+      <div class="row"><input id="addName" placeholder="设备名称（如：我的电脑）"></div>
+      <div class="row"><input id="addMac" placeholder="MAC 地址（如：AA:BB:CC:DD:EE:FF）"></div>
+      <div class="row"><button id="btnAdd" style="flex:1">➕ 手动添加设备</button></div>
+    </div>
+    <div class="addbox">
+      <div class="row"><button id="btnScan" class="green" style="flex:1">📡 扫描当前网络设备</button></div>
+      <div id="scanresult"></div>
+    </div>
+    <div class="subsection">已管理设备</div>
+    <div id="managelist"></div>
+  </div>
+
+  <div id="log">就绪</div>
+</div>
+
+<script>
+var DEVICES = [];
+var SCAN_RESULT = [];
+var STATUS = {};     // mac -> {online, ip}
+var WAKING = {};     // mac -> {start, timer}
+var HISTORY = {};    // mac -> [costs...] 最新在前
+function $(id) { return document.getElementById(id); }
+function log(m) { $("log").textContent = m; }
+function authLog(m) { $("authlog").textContent = m; }
+function norm(m) { return (m || "").toUpperCase(); }
+
+function init() {
+  fetch("cgi-bin/check2fa").then(function(r){ return r.json(); }).then(function(d){
+    if (d.ok) { showMain(); } else { showAuth(); }
+  }).catch(function(){ showAuth(); });
+}
+
+function showAuth() {
+  $("authview").style.display = "block";
+  $("mainview").style.display = "none";
+  $("codeInput").focus();
+}
+
+function showMain() {
+  $("authview").style.display = "none";
+  $("mainview").style.display = "block";
+  loadDevices();
+}
+
+function verify2FA() {
+  var code = $("codeInput").value.trim();
+  if (!/^[0-9]{6}$/.test(code)) { authLog("请输入 6 位数字验证码"); return; }
+  authLog("验证中...");
+  fetch("cgi-bin/verify2fa?code=" + code).then(function(r){ return r.json(); }).then(function(d){
+    if (d.ok) { authLog("✅ 验证成功"); showMain(); }
+    else { authLog("❌ " + (d.err || "验证失败")); }
+  }).catch(function(e){ authLog("请求失败: " + e); });
+}
+
+function loadDevices() {
+  fetch("cgi-bin/devices").then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) { log("加载失败: " + (d.err || "")); return; }
+    DEVICES = d.devices;
+    renderWake(); renderManage();
+    refreshAllStatus();
+    refreshAllHistory();
+  }).catch(function(e){ log("加载失败: " + e); });
+}
+
+// ============ 状态检测 ============
+function checkStatus(mac) {
+  return fetch("cgi-bin/status?mac=" + encodeURIComponent(mac))
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) STATUS[norm(mac)] = d; return d; })
+    .catch(function(){ return { ok:false }; });
+}
+
+function refreshAllStatus() {
+  var promises = DEVICES.map(function(d) { return checkStatus(d.mac); });
+  return Promise.all(promises).then(function() {
+    DEVICES.forEach(function(d) { updateWakeCard(d.mac); });
+  });
+}
+
+// ============ 唤醒历史 ============
+function refreshAllHistory() {
+  var promises = DEVICES.map(function(d) {
+    return fetch("cgi-bin/wakelog?mac=" + encodeURIComponent(d.mac))
+      .then(function(r){ return r.json(); })
+      .then(function(d2){ if (d2.ok) HISTORY[norm(d.mac)] = d2.history || []; })
+      .catch(function(){});
+  });
+  return Promise.all(promises).then(function() {
+    DEVICES.forEach(function(d) { updateWakeCard(d.mac); });
+  });
+}
+
+function recordHistory(mac, cost) {
+  return fetch("cgi-bin/wakelog?mac=" + encodeURIComponent(mac) + "&cost=" + cost)
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) HISTORY[norm(mac)] = d.history || []; })
+    .catch(function(){});
+}
+
+function historyText(mac) {
+  var h = HISTORY[norm(mac)];
+  if (!h || !h.length) return null;
+  var txt = "⏱ 最近唤醒: " + h.join("s / ") + "s";
+  if (h.length >= 2) {
+    var diff = h[0] - h[1];
+    if (diff > 0) txt += "（+" + diff + "s 变慢）";
+    else if (diff < 0) txt += "（" + diff + "s 变快）";
+    else txt += "（持平）";
+  }
+  return txt;
+}
+
+function historyClass(mac) {
+  var h = HISTORY[norm(mac)];
+  if (!h || h.length < 2) return "hist";
+  return h[0] > h[1] ? "hist up" : (h[0] < h[1] ? "hist down" : "hist");
+}
+
+// ============ 状态显示 ============
+function statusText(mac) {
+  var k = norm(mac);
+  if (WAKING[k]) return { cls:"yellow", txt:"🟡 唤醒中..." };
+  var s = STATUS[k];
+  if (!s) return { cls:"gray", txt:"⏳ 检测中..." };
+  if (s.online) return { cls:"green", txt:"🟢 已开机 (在线)" };
+  return { cls:"gray", txt:"⚪ 已关机 (离线)" };
+}
+
+function updateWakeCard(mac) {
+  var k = norm(mac);
+  var el = document.getElementById("st_" + k);
+  if (el) {
+    var st = statusText(mac);
+    el.className = "status " + st.cls;
+    el.textContent = st.txt;
+  }
+  var histEl = document.getElementById("hist_" + k);
+  if (histEl) {
+    var ht = historyText(mac);
+    if (ht) {
+      histEl.className = historyClass(mac);
+      histEl.textContent = ht;
+      histEl.style.display = "inline-block";
+    } else {
+      histEl.style.display = "none";
+    }
+  }
+}
+
+// ============ 唤醒流程（独立计时器） ============
+function wakeFlow(mac, btn) {
+  var k = norm(mac);
+  if (WAKING[k]) { log("该设备已在唤醒流程中..."); return; }
+  btn.textContent = "检测中";
+  btn.className = "gray";
+  checkStatus(mac).then(function(s) {
+    if (s.online) {
+      btn.textContent = "已开机";
+      btn.className = "ok";
+      log("✅ " + mac + " 已在线，无需唤醒");
+      updateWakeCard(mac);
+      setTimeout(function(){ btn.textContent = "唤醒"; btn.className = ""; }, 2000);
+      return;
+    }
+    fetch("cgi-bin/wol?mac=" + encodeURIComponent(mac)).then(function(r){ return r.json(); }).then(function(w){
+      if (!w.ok) {
+        btn.textContent = "发送失败";
+        btn.className = "err";
+        log("❌ 唤醒包发送失败: " + (w.err || "未知错误"));
+        setTimeout(function(){ btn.textContent = "唤醒"; btn.className = ""; }, 2500);
+        return;
+      }
+      var start = Date.now();
+      // 独立计时器：每 200ms 更新按钮文字（不受轮询延迟影响）
+      var timer = setInterval(function() {
+        if (!WAKING[k]) { clearInterval(timer); return; }
+        var sec = ((Date.now() - start) / 1000).toFixed(1);
+        btn.textContent = "唤醒中 " + sec + "s";
+      }, 200);
+      WAKING[k] = { start: start, timer: timer };
+      updateWakeCard(mac);
+      log("🟡 已发送唤醒包，正在等待 " + mac + " 开机...");
+      pollWake(mac, btn, start);
+    }).catch(function(e){
+      btn.textContent = "请求失败";
+      btn.className = "err";
+      log("❌ 请求失败: " + e);
+    });
+  });
+}
+
+function pollWake(mac, btn, start) {
+  var k = norm(mac);
+  var elapsed = Date.now() - start;
+  if (elapsed > 90000) {
+    var st = WAKING[k]; if (st) clearInterval(st.timer);
+    delete WAKING[k];
+    btn.textContent = "唤醒失败";
+    btn.className = "err";
+    log("❌ " + mac + " 唤醒超时（90秒），可能设备不支持 WOL 或设置未开启");
+    updateWakeCard(mac);
+    setTimeout(function(){ btn.textContent = "唤醒"; btn.className = ""; }, 3000);
+    return;
+  }
+  checkStatus(mac).then(function(s) {
+    if (s.online) {
+      var cost = Math.round((Date.now() - start) / 1000);
+      var st2 = WAKING[k]; if (st2) clearInterval(st2.timer);
+      delete WAKING[k];
+      btn.textContent = "✅ " + cost + "s";
+      btn.className = "ok";
+      log("✅ " + mac + " 唤醒成功！耗时 " + cost + " 秒");
+      // 记录历史 + 刷新显示
+      recordHistory(mac, cost).then(function(){ updateWakeCard(mac); });
+      updateWakeCard(mac);
+      setTimeout(function(){ btn.textContent = "唤醒"; btn.className = ""; }, 3000);
+      return;
+    }
+    setTimeout(function(){ pollWake(mac, btn, start); }, 2000);
+  });
+}
+
+// ============ 渲染 ============
+function renderWake() {
+  var box = $("wakeview"); box.innerHTML = "";
+  if (!DEVICES.length) { box.innerHTML = '<div class="muted">暂无设备，去"管理设备"添加</div>'; return; }
+  DEVICES.forEach(function(d) {
+    var div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = '<div style="flex:1;min-width:0">' +
+        '<div class="name"></div><div class="mac"></div>' +
+        '<div id="st_' + norm(d.mac) + '" class="status gray">⏳ 检测中...</div>' +
+        '<div id="hist_' + norm(d.mac) + '" class="hist" style="display:none"></div>' +
+        '</div>';
+    div.querySelector(".name").textContent = d.name;
+    div.querySelector(".mac").textContent = d.mac;
+    var btn = document.createElement("button");
+    btn.textContent = "唤醒";
+    btn.onclick = function(){ wakeFlow(d.mac, btn); };
+    div.appendChild(btn);
+    box.appendChild(div);
+  });
+}
+
+function renderManage() {
+  var box = $("managelist"); box.innerHTML = "";
+  if (!DEVICES.length) { box.innerHTML = '<div class="muted">暂无设备</div>'; return; }
+  DEVICES.forEach(function(d) {
+    var div = document.createElement("div");
+    div.className = "card devrow";
+    div.innerHTML = '<div class="info"><div class="name"></div><div class="mac"></div></div>';
+    div.querySelector(".name").textContent = d.name;
+    div.querySelector(".mac").textContent = d.mac;
+    var edit = document.createElement("button");
+    edit.className = "small gray"; edit.textContent = "编辑";
+    edit.onclick = function(){
+      var nn = prompt("设备名称：", d.name); if (nn === null) return;
+      var nm = prompt("MAC 地址：", d.mac); if (nm === null) return;
+      api("upd&idx=" + d.idx + "&name=" + encodeURIComponent(nn) + "&mac=" + encodeURIComponent(nm));
+    };
+    var del = document.createElement("button");
+    del.className = "small red"; del.textContent = "删除";
+    del.onclick = function(){ if (!confirm("确定删除「" + d.name + "」？")) return; api("del&idx=" + d.idx); };
+    var wrap = document.createElement("div"); wrap.className = "devrow";
+    wrap.appendChild(edit); wrap.appendChild(del);
+    div.appendChild(wrap); box.appendChild(div);
+  });
+}
+
+function renderScan() {
+  var box = $("scanresult"); box.innerHTML = "";
+  if (!SCAN_RESULT.length) { box.innerHTML = '<div class="muted">未扫描到设备</div>'; return; }
+  var managed = {};
+  DEVICES.forEach(function(d){ managed[norm(d.mac)] = true; });
+  var online = SCAN_RESULT.filter(function(s){ return s.online; });
+  var head = document.createElement("div");
+  head.className = "subsection"; head.textContent = "扫描到 " + online.length + " 台在线设备";
+  box.appendChild(head);
+  online.forEach(function(s) {
+    var div = document.createElement("div");
+    div.className = "card scanrow";
+    div.innerHTML = '<div class="info"><div class="name"></div><div class="mac"></div></div>';
+    div.querySelector(".name").textContent = s.ip + "  " + (s.name && s.name !== s.ip ? s.name : "");
+    div.querySelector(".mac").textContent = s.mac;
+    var isManaged = managed[norm(s.mac)];
+    var btn = document.createElement("button");
+    btn.className = isManaged ? "small gray" : "small green";
+    btn.textContent = isManaged ? "已添加" : "添加";
+    if (!isManaged) {
+      btn.onclick = function(){
+        var name = (s.name && s.name !== s.ip) ? s.name : s.ip;
+        api("add&name=" + encodeURIComponent(name) + "&mac=" + encodeURIComponent(s.mac));
+      };
+    }
+    div.appendChild(btn); box.appendChild(div);
+  });
+}
+
+function scanNetwork() {
+  var btn = $("btnScan");
+  btn.textContent = "🔄 扫描中..."; btn.disabled = true;
+  fetch("cgi-bin/scan").then(function(r){ return r.json(); }).then(function(d){
+    btn.textContent = "📡 扫描当前网络设备"; btn.disabled = false;
+    if (d.ok) { SCAN_RESULT = d.devices; renderScan(); log("✅ 扫描完成，在线 " + d.devices.length + " 台"); }
+    else { log("❌ " + (d.err || "扫描失败")); }
+  }).catch(function(e){
+    btn.textContent = "📡 扫描当前网络设备"; btn.disabled = false; log("扫描请求失败: " + e);
+  });
+}
+
+function api(qs) {
+  fetch("cgi-bin/devices?" + qs).then(function(r){ return r.json(); }).then(function(d){
+    if (d.ok) {
+      DEVICES = d.devices;
+      renderWake(); renderManage(); renderScan();
+      log("✅ 操作成功");
+      refreshAllStatus();
+      refreshAllHistory();
+    }
+    else { log("❌ " + (d.err || "操作失败")); }
+  }).catch(function(e){ log("请求失败: " + e); });
+}
+
+// ============ 事件 ============
+$("btnWakeView").onclick = function(){ $("wakeview").style.display="block"; $("manage").style.display="none"; this.className=""; $("btnManageView").className="gray"; };
+$("btnManageView").onclick = function(){ $("wakeview").style.display="none"; $("manage").style.display="block"; this.className=""; $("btnWakeView").className="gray"; };
+$("btnRefreshStatus").onclick = function(){
+  log("刷新设备状态...");
+  Promise.all([refreshAllStatus(), refreshAllHistory()]).then(function() {
+    log("✅ 设备状态已刷新（" + DEVICES.length + " 台设备）");
+  });
+};
+$("btnAdd").onclick = function(){
+  var n = $("addName").value.trim(), m = $("addMac").value.trim();
+  if (!n || !m) { log("❌ 请填写名称和 MAC"); return; }
+  api("add&name=" + encodeURIComponent(n) + "&mac=" + encodeURIComponent(m));
+  $("addName").value = ""; $("addMac").value = "";
+};
+$("btnScan").onclick = scanNetwork;
+$("btnVerify").onclick = verify2FA;
+$("codeInput").addEventListener("keydown", function(e){ if (e.key === "Enter") verify2FA(); });
+
+init();
+</script>
+</body>
+</html>
