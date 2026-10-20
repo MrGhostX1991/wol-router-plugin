@@ -1,0 +1,37 @@
+#!/bin/sh
+. /data/wol/cgi-bin/_auth.sh
+if ! check_2fa; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"需要2FA验证","need_2fa":true}'
+    exit 0
+fi
+
+QS="$QUERY_STRING"
+MACENC=$(echo "$QS" | sed 's/.*mac=//;s/&.*//')
+MAC=$(uhttpd -d "$MACENC" 2>/dev/null)
+[ -z "$MAC" ] && MAC="$MACENC"
+
+if [ -z "$MAC" ]; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"缺少 mac 参数"}'
+    exit 0
+fi
+
+MAC_LC=$(echo "$MAC" | tr 'A-F' 'a-f')
+IP=$(awk -v m="$MAC_LC" 'tolower($2)==m {print $3; exit}' /tmp/dhcp.leases 2>/dev/null)
+
+ONLINE=false
+if [ -n "$IP" ]; then
+    if ping -c 1 -W 1 "$IP" >/dev/null 2>&1; then
+        ONLINE=true
+    fi
+fi
+
+echo "Content-Type: application/json; charset=utf-8"
+echo "Cache-Control: no-cache"
+echo ""
+echo "{\"ok\":true,\"mac\":\"$MAC\",\"ip\":\"$IP\",\"online\":$ONLINE}"
