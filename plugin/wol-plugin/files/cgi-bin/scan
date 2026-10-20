@@ -1,0 +1,102 @@
+#!/usr/bin/lua
+-- /data/wol/cgi-bin/scan - 扫描局域网设备（lua 单进程）
+local function out(s) io.write(s) end
+
+-- 2FA 检查
+local cookie = os.getenv("HTTP_COOKIE") or ""
+local token = cookie:match("wol_2fa=([^;]+)")
+local auth_ok = false
+if token then
+    local f = io.open("/tmp/.wol_2fa_sessions", "r")
+    if f then
+        local now = os.time()
+        for line in f:lines() do
+            local t, exp = line:match("^([^|]+)|(%d+)$")
+            if t == token and tonumber(exp) and tonumber(exp) > now then
+                auth_ok = true; break
+            end
+        end
+        f:close()
+    end
+end
+if not auth_ok then
+    out('Content-Type: application/json; charset=utf-8\n')
+    out('Cache-Control: no-cache\n\n')
+    out('{"ok":false,"err":"需要2FA验证","need_2fa":true}')
+    os.exit(0)
+end
+
+-- 读 ARP
+local arp = {}
+local f = io.open("/proc/net/arp", "r")
+if f then
+    local first = true
+    for line in f:lines() do
+        if not first then
+            local ip, mac = line:match("^(%d+%.%d+%.%d+%.%d+)%s+%S+%s+%S+%s+(%S+)")
+            if ip and mac and mac ~= "00:00:00:00:00:00" then
+                arp[#arp+1] = {ip=ip, mac=mac:upper()}
+            end
+        end
+        first = false
+    end
+    f:close()
+end
+
+-- 读 DHCP 租约（MAC -> hostname）
+local hostname = {}
+local f2 = io.open("/tmp/dhcp.leases", "r")
+if f2 then
+    for line in f2:lines() do
+        local ts, mac, ip, host = line:match("^(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
+        if mac and host and host ~= "*" then
+            hostname[mac:lower()] = host
+        end
+    end
+    f2:close()
+end
+
+-- 判断 hostname 是否有效（可打印且不含乱码字符）
+local function valid_host(h)
+    if not h or #h == 0 or h == "*" then return false end
+    if h:match("%?") then return false end           -- 含 ? 视为乱码
+    if h:match("[^ -~]") then return false end       -- 非 ASCII 可打印
+    return true
+end
+
+-- 过滤 + 去重 + 排序
+local seen = {}
+local list = {}
+for _, a in ipairs(arp) do
+    local ip, mac = a.ip, a.mac
+    local m = mac:lower()
+    if not seen[m] then
+        if ip:match("^192%.168%.31%.") or ip:match("^192%.168%.33%.") then
+            seen[m] = true
+            local host = hostname[m]
+            if not valid_host(host) then host = ip end
+            list[#list+1] = {ip=ip, mac=mac, name=host}
+        end
+    end
+end
+
+table.sort(list, function(a, b)
+    local ai = tonumber(a.ip:match("^192%.168%.%d+%.(%d+)$") or 0)
+    local bi = tonumber(b.ip:match("^192%.168%.%d+%.(%d+)$") or 0)
+    if ai ~= bi then return ai < bi end
+    return a.ip < b.ip
+end)
+
+-- 输出 JSON
+local function esc(s)
+    return (s:gsub("\\", "\\\\"):gsub('"', '\\"'))
+end
+out('Content-Type: application/json; charset=utf-8\n')
+out('Cache-Control: no-cache\n\n')
+out('{"ok":true,"devices":[')
+for i, d in ipairs(list) do
+    if i > 1 then out(",") end
+    out(string.format('{"ip":"%s","mac":"%s","name":"%s","online":true}',
+        esc(d.ip), esc(d.mac), esc(d.name)))
+end
+out(']}')
