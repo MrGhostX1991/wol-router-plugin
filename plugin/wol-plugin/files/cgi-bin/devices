@@ -1,0 +1,55 @@
+#!/bin/sh
+. /data/wol/cgi-bin/_auth.sh
+if ! check_2fa; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"需要2FA验证","need_2fa":true}'
+    exit 0
+fi
+
+FILE=/data/wol/devices.txt
+echo "Content-Type: application/json; charset=utf-8"
+echo "Cache-Control: no-cache"
+echo ""
+QS="$QUERY_STRING"
+ACTION=$(echo "$QS" | sed 's/.*action=//;s/&.*//')
+IDX=$(echo "$QS" | sed 's/.*idx=//;s/&.*//')
+NAME_ENC=$(echo "$QS" | sed 's/.*name=//;s/&.*//')
+MAC_ENC=$(echo "$QS" | sed 's/.*mac=//;s/&.*//')
+decode() { [ -z "$1" ] && return; uhttpd -d "$1" 2>/dev/null; }
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+gen_list() {
+    echo -n '{"ok":true,"devices":['
+    FIRST=1; ID=0
+    while IFS='|' read -r N M; do
+        [ -z "$N" ] && continue
+        [ $FIRST -eq 1 ] || echo -n ','
+        FIRST=0
+        printf '{"idx":%d,"name":"%s","mac":"%s"}' "$ID" "$(json_escape "$N")" "$(json_escape "$M")"
+        ID=$((ID+1))
+    done < "$FILE"
+    echo ']}'
+}
+validate_mac() { echo "$1" | grep -qiE '^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$'; }
+case "$ACTION" in
+    add)
+        NAME=$(decode "$NAME_ENC"); MAC=$(decode "$MAC_ENC")
+        [ -z "$NAME" ] && { echo '{"ok":false,"err":"名称不能为空"}'; exit 0; }
+        validate_mac "$MAC" || { echo '{"ok":false,"err":"MAC 格式错误"}'; exit 0; }
+        grep -qi "|$MAC$" "$FILE" 2>/dev/null && { echo '{"ok":false,"err":"MAC 已存在"}'; exit 0; }
+        printf '%s|%s\n' "$NAME" "$MAC" >> "$FILE"
+        gen_list ;;
+    del)
+        echo "$IDX" | grep -qE '^[0-9]+$' || { echo '{"ok":false,"err":"idx 无效"}'; exit 0; }
+        line=$((IDX+1)); sed -i "${line}d" "$FILE" 2>/dev/null
+        gen_list ;;
+    upd)
+        NAME=$(decode "$NAME_ENC"); MAC=$(decode "$MAC_ENC")
+        echo "$IDX" | grep -qE '^[0-9]+$' || { echo '{"ok":false,"err":"idx 无效"}'; exit 0; }
+        [ -z "$NAME" ] && { echo '{"ok":false,"err":"名称不能为空"}'; exit 0; }
+        validate_mac "$MAC" || { echo '{"ok":false,"err":"MAC 格式错误"}'; exit 0; }
+        awk -v idx="$IDX" -v line="$NAME|$MAC" 'NR==idx+1{print line; next} {print}' "$FILE" > "$FILE.tmp" && mv "$FILE.tmp" "$FILE"
+        gen_list ;;
+    *) gen_list ;;
+esac
