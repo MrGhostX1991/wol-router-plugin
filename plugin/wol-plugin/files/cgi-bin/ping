@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "Content-Type: application/json; charset=utf-8"
+echo ""
+echo '{"ok":true}'
