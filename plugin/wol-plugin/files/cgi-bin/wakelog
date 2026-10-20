@@ -1,0 +1,51 @@
+#!/bin/sh
+. /data/wol/cgi-bin/_auth.sh
+if ! check_2fa; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"需要2FA验证","need_2fa":true}'
+    exit 0
+fi
+
+QS="$QUERY_STRING"
+FILE=/data/wol/wake_history.txt
+
+MACENC=$(echo "$QS" | sed 's/.*mac=//;s/&.*//')
+MAC=$(uhttpd -d "$MACENC" 2>/dev/null)
+[ -z "$MAC" ] && MAC="$MACENC"
+COSTENC=$(echo "$QS" | sed 's/.*cost=//;s/&.*//')
+COST=$(uhttpd -d "$COSTENC" 2>/dev/null)
+[ -z "$COST" ] && COST="$COSTENC"
+
+if [ -z "$MAC" ]; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"缺少 mac"}'
+    exit 0
+fi
+
+MAC_UP=$(echo "$MAC" | tr 'a-f' 'A-F')
+
+if [ -n "$COST" ] && echo "$COST" | grep -qE '^[0-9]+$'; then
+    echo "$MAC_UP|$(date +%s)|$COST" >> "$FILE"
+fi
+
+# 查最近 3 次（倒序：最新在前），用 awk 实现（busybox 无 tac）
+echo "Content-Type: application/json; charset=utf-8"
+echo "Cache-Control: no-cache"
+echo ""
+echo -n '{"ok":true,"mac":"'"$MAC_UP"'","history":['
+grep -i "^$MAC_UP|" "$FILE" 2>/dev/null | tail -3 | awk -F'|' '
+{ c[NR] = $3 }
+END {
+    first = 1
+    for (i = NR; i >= 1; i--) {
+        if (c[i] == "") continue
+        if (!first) printf ","
+        first = 0
+        printf "%s", c[i]
+    }
+}'
+echo ']}'
