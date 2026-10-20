@@ -1,0 +1,46 @@
+#!/bin/sh
+# /cgi-bin/verify2fa?code=123456 - 验证 TOTP 验证码
+QS="$QUERY_STRING"
+CODE=$(echo "$QS" | sed 's/.*code=//;s/&.*//')
+SECRET=$(cat /data/wol/2fa_secret 2>/dev/null)
+
+# 错误情况：只输出 JSON
+if [ -z "$SECRET" ]; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"2FA 未初始化"}'
+    exit 0
+fi
+if ! echo "$CODE" | grep -qE '^[0-9]{6}$'; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"验证码格式错误"}'
+    exit 0
+fi
+
+NOW=$(date +%s)
+OK=0
+for OFFSET in -30 0 30; do
+    T=$((NOW + OFFSET))
+    EXPECTED=$(lua /data/wol/totp.lua "$SECRET" "$T" 2>/dev/null)
+    if [ "$EXPECTED" = "$CODE" ]; then OK=1; break; fi
+done
+
+if [ $OK -eq 1 ]; then
+    TOKEN=$(head -c 16 /dev/urandom | md5sum | cut -d' ' -f1)
+    EXP=$((NOW + 7200))
+    echo "$TOKEN|$EXP" >> /tmp/.wol_2fa_sessions
+    # 关键：所有头（含 Set-Cookie）在空行之前输出
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo "Set-Cookie: wol_2fa=$TOKEN; Path=/; Max-Age=7200; HttpOnly"
+    echo ""
+    echo '{"ok":true}'
+else
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"验证码错误"}'
+fi
