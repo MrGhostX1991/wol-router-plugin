@@ -1,0 +1,21 @@
+# 敏感文件
+*.keystore
+keystore-password.txt
+*password*.txt
+
+# 构建产物
+build/
+*.apk
+*.aab
+
+# 工具链
+android-tools/
+android-sdk/
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统
+.DS_Store
+Thumbs.db
