@@ -1,0 +1,40 @@
+#!/bin/sh
+. /data/wol/cgi-bin/_auth.sh
+if ! check_2fa; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"需要2FA验证","need_2fa":true}'
+    exit 0
+fi
+
+QS="$QUERY_STRING"
+MACENC=$(echo "$QS" | sed 's/.*mac=//;s/&.*//')
+MAC=$(uhttpd -d "$MACENC" 2>/dev/null)
+[ -z "$MAC" ] && MAC="$MACENC"
+if [ -z "$MAC" ]; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"缺少 mac 参数"}'
+    exit 0
+fi
+if ! echo "$MAC" | grep -qiE '^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$'; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":false,"err":"MAC 格式错误"}'
+    exit 0
+fi
+RESULT=$(lua /data/wol/wol.lua "$MAC" 2>&1)
+if [ "$RESULT" = "OK" ]; then
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo '{"ok":true,"msg":"已发送唤醒包"}'
+else
+    echo "Content-Type: application/json; charset=utf-8"
+    echo "Cache-Control: no-cache"
+    echo ""
+    echo "{\"ok\":false,\"err\":\"$RESULT\"}"
+fi
